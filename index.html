@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Star Wars-Inspired Space Shooter</title>
+    <!-- Tailwind CSS CDN for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        /* Apply Inter font, ensuring fallback */
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            overflow: hidden; /* Hide scrollbars */
+        }
+        canvas {
+            display: block; /* Remove extra space below canvas */
+        }
+        /* Custom styles for the knob/buttons */
+        .shooting-mode-toggle {
+            display: flex;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 9999px; /* Fully rounded */
+            padding: 4px;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
+            gap: 4px; /* Space between buttons */
+        }
+        .shooting-mode-toggle button {
+            padding: 8px 16px;
+            border-radius: 9999px; /* Fully rounded */
+            font-weight: bold;
+            transition: all 0.2s ease-in-out;
+            border: none;
+            cursor: pointer;
+            color: #fff;
+            background: transparent;
+        }
+        .shooting-mode-toggle button.active {
+            background: linear-gradient(to bottom right, #6366F1, #8B5CF6); /* Indigo-Purple gradient */
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            transform: scale(1.05);
+        }
+        /* Style for movement and fire buttons */
+        .game-control-button {
+            background-color: rgba(60, 100, 255, 0.7); /* Slightly transparent blue */
+            border-radius: 50%; /* Circular */
+            box-shadow: 0 4px 8px rgba(0,0,0,0.4);
+            transition: background-color 0.2s, transform 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none; /* Prevent text selection on touch */
+            -webkit-user-select: none; /* For iOS */
+            -moz-user-select: none; /* For Firefox */
+            -ms-user-select: none; /* For Edge */
+            touch-action: manipulation; /* Prevent default touch actions like double tap zoom */
+        }
+        .game-control-button:active {
+            background-color: rgba(40, 80, 200, 0.9); /* Darker on active */
+            transform: scale(0.95);
+        }
+        #fire-button {
+            background-color: rgba(255, 60, 60, 0.7); /* Slightly transparent red */
+        }
+        #fire-button:active {
+            background-color: rgba(200, 40, 40, 0.9);
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-indigo-900 to-purple-900 text-white flex items-center justify-center w-screen h-screen overflow-hidden">
+
+    <!-- Score display -->
+    <div id="score-display" class="absolute top-4 left-4 p-3 bg-white bg-opacity-20 rounded-lg shadow-lg text-lg font-bold z-20">
+        Score: 0
+    </div>
+
+    <!-- Player Health display -->
+    <div id="health-display" class="absolute top-4 right-4 p-3 bg-white bg-opacity-20 rounded-lg shadow-lg text-lg font-bold z-20">
+        Health: 100
+    </div>
+
+    <!-- Shooting Mode Toggle -->
+    <div class="absolute top-4 left-1/2 -translate-x-1/2 z-20">
+        <div class="shooting-mode-toggle">
+            <button id="single-shot-button" class="active">Single Shot</button>
+            <button id="mass-bomb-button">Mass Bomb</button>
+        </div>
+    </div>
+
+    <!-- Movement Controls -->
+    <div class="absolute bottom-4 left-4 z-20 flex gap-4">
+        <button id="move-left-button" class="game-control-button w-16 h-16 text-3xl font-bold">
+            &lt;
+        </button>
+        <button id="move-right-button" class="game-control-button w-16 h-16 text-3xl font-bold">
+            &gt;
+        </button>
+    </div>
+
+    <!-- Fire Button -->
+    <div class="absolute bottom-4 right-4 z-20">
+        <button id="fire-button" class="game-control-button w-24 h-24 text-xl font-bold">
+            FIRE
+        </button>
+    </div>
+
+    <!-- Game Canvas Container -->
+    <div id="game-container" class="w-full h-full relative">
+        <!-- Three.js canvas will be appended here by JavaScript -->
+    </div>
+
+    <!-- Game over/Start message overlay -->
+    <div id="game-overlay" class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-70 text-white text-3xl font-bold rounded-lg shadow-2xl z-10 p-4">
+        <div class="text-center">
+            <p id="game-message" class="mb-4">Tap to Start!</p>
+            <p id="gemini-analysis" class="text-xl font-normal mt-4 italic"></p> <!-- New element for Gemini analysis -->
+            <button id="start-game-button" class="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold py-3 px-6 rounded-full shadow-lg transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-blue-500 focus:ring-opacity-50
+                border-2 border-blue-400
+                bg-gradient-to-br from-blue-500 to-blue-700
+                active:shadow-inner active:border-blue-600
+                text-shadow-sm">
+                Start Game
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Game state and Three.js objects
+        const game = {
+            scene: null,
+            camera: null,
+            renderer: null,
+            player: null,
+            projectiles: [],
+            asteroids: [],
+            backgroundStars: [],
+            explosionParticles: [],
+            score: 0,
+            playerHealth: 100,
+            maxPlayerHealth: 100,
+            gameStarted: false,
+            lastSpawnTime: 0,
+            spawnInterval: 1000,
+            asteroidSpeed: 0.05,
+            projectileSpeed: 0.3,
+            touchStartX: 0, // Used for tap detection on main canvas
+            touchStartY: 0, // Used for tap detection on main canvas
+            touchThreshold: 10, // Minimum movement for a swipe vs tap
+            isMovingLeft: false, // New flag for left movement
+            isMovingRight: false, // New flag for right movement
+            playerSpeed: 0.15, // Speed for player movement
+            animationFrameId: null,
+            confettiParticles: [],
+            shootingMode: 'single', // 'single' or 'mass'
+        };
+
+        const frustumSize = 20;
+
+        // DOM elements
+        const gameContainer = document.getElementById('game-container');
+        const scoreDisplay = document.getElementById('score-display');
+        const healthDisplay = document.getElementById('health-display');
+        const gameOverlay = document.getElementById('game-overlay');
+        const gameMessage = document.getElementById('game-message');
+        const geminiAnalysisElement = document.getElementById('gemini-analysis'); // New
+        const startGameButton = document.getElementById('start-game-button');
+        const singleShotButton = document.getElementById('single-shot-button');
+        const massBombButton = document.getElementById('mass-bomb-button');
+        const moveLeftButton = document.getElementById('move-left-button');
+        const moveRightButton = document.getElementById('move-right-button');
+        const fireButton = document.getElementById('fire-button');
+
+        /**
+         * Generates a random hexadecimal color string.
+         * @returns {string} A random color string (e.g., "#RRGGBB").
+         */
+        function getRandomColor() {
+            const letters = '0123456789ABCDEF';
+            let color = '#';
+            for (let i = 0; i < 6; i++) {
+                color += letters[Math.floor(Math.random() * 16)];
+            }
+            return color;
+        }
+
+        /**
+         * Creates a single confetti particle.
+         * @param {number} x - X position.
+         * @param {number} y - Y position.
+         * @param {number} z - Z position.
+         * @returns {THREE.Mesh} The confetti particle mesh.
+         */
+        function createConfettiParticle(x, y, z) {
+            const material = new THREE.MeshBasicMaterial({ color: getRandomColor(), side: THREE.DoubleSide });
+            const geometry = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+            const particle = new THREE.Mesh(geometry, material);
+            particle.position.set(x, y, z);
+            particle.userData = {
+                velocity: new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.1,
+                    Math.random() * 0.1 + 0.05,
+                    (Math.random() - 0.5) * 0.1
+                ),
+                rotationSpeed: new THREE.Vector3(
+                    Math.random() * 0.1,
+                    Math.random() * 0.1,
+                    Math.random() * 0.1
+                ),
+                life: 60
+            };
+            return particle;
+        }
+
+        /**
+         * Spawns multiple confetti particles at a given location.
+         * @param {number} x - X position to spawn confetti.
+         * @param {number} y - Y position to spawn confetti.
+         * @param {number} z - Z position to spawn confetti.
+         * @param {number} count - Number of confetti particles to spawn.
+         */
+        function spawnConfetti(x, y, z, count = 20) {
+            for (let i = 0; i < count; i++) {
+                const particle = createConfettiParticle(x, y, z);
+                game.scene.add(particle);
+                game.confettiParticles.push(particle);
+            }
+        }
+
+        /**
+         * Creates a single explosion particle.
+         * @param {number} x - X position.
+         * @param {number} y - Y position.
+         * @param {number} z - Z position.
+         * @param {number} initialSize - Initial size of the particle.
+         * @returns {THREE.Mesh} The explosion particle mesh.
+         */
+        function createExplosionParticle(x, y, z, initialSize) {
+            const geometry = new THREE.BoxGeometry(initialSize, initialSize, initialSize);
+            const material = new THREE.MeshBasicMaterial({ color: 0xFF4500, transparent: true, opacity: 1.0 }); // Orange-red
+            const particle = new THREE.Mesh(geometry, material);
+            particle.position.set(x, y, z);
+            particle.userData = {
+                velocity: new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.2,
+                    (Math.random() - 0.5) * 0.2,
+                    (Math.random() - 0.5) * 0.2
+                ),
+                life: 30,
+                maxLife: 30,
+                scaleSpeed: 0.05
+            };
+            return particle;
+        }
+
+        /**
+         * Spawns an explosion effect at a given location.
+         * @param {number} x - X position for explosion center.
+         * @param {number} y - Y position for explosion center.
+         * @param {number} z - Z position for explosion center.
+         * @param {number} count - Number of particles in the explosion.
+         * @param {number} initialParticleSize - Initial size of each particle.
+         */
+        function spawnExplosion(x, y, z, count = 15, initialParticleSize = 0.2) {
+            for (let i = 0; i < count; i++) {
+                const particle = createExplosionParticle(x, y, z, initialParticleSize);
+                game.scene.add(particle);
+                game.explosionParticles.push(particle);
+            }
+        }
+
+        /**
+         * Finds the nearest asteroid to a given position.
+         * @param {THREE.Vector3} position - The position to search from.
+         * @returns {THREE.Mesh|null} The nearest asteroid or null if none found.
+         */
+        function findNearestAsteroid(position) {
+            let nearestAsteroid = null;
+            let minDistance = Infinity;
+
+            for (const asteroid of game.asteroids) {
+                const distance = position.distanceTo(asteroid.position);
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    nearestAsteroid = asteroid;
+                }
+            }
+            return nearestAsteroid;
+        }
+
+        /**
+         * Initializes the Three.js scene, camera, renderer, and game objects.
+         */
+        function initThreeJS() {
+            // Scene setup
+            game.scene = new THREE.Scene();
+            game.scene.background = new THREE.Color(0x1a1a2e); // Dark purple background (space)
+
+            // Camera setup (OrthographicCamera for 2D-like game in 3D space)
+            const aspect = window.innerWidth / window.innerHeight;
+            game.camera = new THREE.OrthographicCamera(
+                frustumSize * aspect / -2,
+                frustumSize * aspect / 2,
+                frustumSize / 2,
+                frustumSize / -2,
+                0.1,
+                1000
+            );
+            game.camera.position.set(0, 0, 50); // Position camera along Z-axis
+
+            // Renderer setup
+            game.renderer = new THREE.WebGLRenderer({ antialias: true });
+            game.renderer.setSize(window.innerWidth, window.innerHeight);
+            game.renderer.setPixelRatio(window.devicePixelRatio);
+            gameContainer.appendChild(game.renderer.domElement);
+
+            // Lights
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            game.scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(5, 10, 7);
+            game.scene.add(directionalLight);
+
+            // Player (Polygonal Spaceship Design - simplified X-wing/A-wing)
+            game.player = new THREE.Group();
+
+            // Main body - a more complex polygonal shape
+            const playerBodyShape = new THREE.Shape();
+            playerBodyShape.moveTo(0, 0.75); // Nose
+            playerBodyShape.lineTo(0.25, 0);
+            playerBodyShape.lineTo(0.5, -0.5);
+            playerBodyShape.lineTo(0.5, -0.75);
+            playerBodyShape.lineTo(0, -1);
+            playerBodyShape.lineTo(-0.5, -0.75);
+            playerBodyShape.lineTo(-0.5, -0.5);
+            playerBodyShape.lineTo(-0.25, 0);
+            playerBodyShape.lineTo(0, 0.75);
+
+            const extrudeSettings = {
+                steps: 1,
+                depth: 0.4, // Thickness
+                bevelEnabled: true,
+                bevelThickness: 0.1,
+                bevelSize: 0.1,
+                bevelSegments: 1
+            };
+            const bodyGeometry = new THREE.ExtrudeGeometry(playerBodyShape, extrudeSettings);
+            bodyGeometry.rotateX(Math.PI / 2); // Orient correctly
+            const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0x808080, flatShading: true }); // Greyish
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            game.player.add(body);
+
+            // Wings
+            const wingGeometry = new THREE.BoxGeometry(0.15, 0.8, 0.1);
+            const wingMaterial = new THREE.MeshStandardMaterial({ color: 0x555555, flatShading: true });
+
+            // Left top wing
+            const leftTopWing = new THREE.Mesh(wingGeometry, wingMaterial);
+            leftTopWing.position.set(-0.7, 0.2, 0.2);
+            leftTopWing.rotation.x = -Math.PI / 8;
+            game.player.add(leftTopWing);
+
+            // Right top wing
+            const rightTopWing = new THREE.Mesh(wingGeometry, wingMaterial);
+            rightTopWing.position.set(0.7, 0.2, 0.2);
+            rightTopWing.rotation.x = -Math.PI / 8;
+            game.player.add(rightTopWing);
+
+            // Set the overall player group position and scale
+            game.player.position.set(0, -7, 0); // Start at the bottom
+            game.player.scale.set(1.5, 1.5, 1.5); // Make it a bit larger
+            game.scene.add(game.player);
+
+            // Background Stars (for parallax)
+            const numStars = 500;
+            for (let i = 0; i < numStars; i++) {
+                const starGeometry = new THREE.SphereGeometry(0.05, 8, 8);
+                const starMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+                const star = new THREE.Mesh(starGeometry, starMaterial);
+
+                // Random positions
+                star.position.x = (Math.random() - 0.5) * frustumSize * aspect;
+                star.position.y = (Math.random() - 0.5) * frustumSize;
+                star.position.z = Math.random() * -40 - 10; // Deeper into the scene (further from camera)
+
+                // Store parallax speed in userData
+                star.userData.speed = Math.random() * 0.01 + 0.005; // Slower for farther stars
+                star.userData.parallaxDepth = Math.random() * 0.5 + 0.5; // For varying movement speeds
+
+                game.scene.add(star);
+                game.backgroundStars.push(star);
+            }
+        }
+
+        /**
+         * Handles window resize events to update camera and renderer.
+         */
+        function onWindowResize() {
+            const newAspect = window.innerWidth / window.innerHeight;
+            game.camera.left = frustumSize * newAspect / -2;
+            game.camera.right = frustumSize * newAspect / 2;
+            game.camera.updateProjectionMatrix();
+            game.renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        /**
+         * The main game animation loop.
+         */
+        function animate() {
+            // Game loop control
+            if (game.gameStarted) {
+                const now = performance.now();
+
+                // Player movement based on buttons
+                const playerBoundingBox = new THREE.Box3().setFromObject(game.player);
+                const playerHalfWidth = (playerBoundingBox.max.x - playerBoundingBox.min.x) / 2;
+                const cameraLeftBound = game.camera.left + playerHalfWidth;
+                const cameraRightBound = game.camera.right - playerHalfWidth;
+
+                if (game.isMovingLeft) {
+                    game.player.position.x -= game.playerSpeed;
+                    game.player.position.x = Math.max(cameraLeftBound, game.player.position.x);
+                }
+                if (game.isMovingRight) {
+                    game.player.position.x += game.playerSpeed; // Corrected to use game.playerSpeed directly
+                    game.player.position.x = Math.min(cameraRightBound, game.player.position.x);
+                }
+
+                // Spawn Asteroids
+                if (now - game.lastSpawnTime > game.spawnInterval) {
+                    const asteroidSize = Math.random() * 0.8 + 0.7;
+                    const asteroidGeometry = new THREE.IcosahedronGeometry(asteroidSize, 0); // Random size, 0 for low poly
+                    const asteroidMaterial = new THREE.MeshStandardMaterial({ color: 0x605040, flatShading: true });
+                    const asteroid = new THREE.Mesh(asteroidGeometry, asteroidMaterial);
+                    asteroid.position.x = (Math.random() - 0.5) * (game.camera.right - game.camera.left - 2);
+                    asteroid.position.y = game.camera.top + 2;
+                    asteroid.position.z = Math.random() * -5 - 1;
+                    
+                    asteroid.userData.rotationSpeed = new THREE.Vector3(
+                        Math.random() * 0.02 - 0.01,
+                        Math.random() * 0.02 - 0.01,
+                        Math.random() * 0.02 - 0.01
+                    );
+                    asteroid.userData.hitPoints = Math.floor(asteroidSize * 5); // Larger asteroids have more HP
+                    asteroid.userData.isAsteroid = true;
+
+                    game.scene.add(asteroid);
+                    game.asteroids.push(asteroid);
+                    game.lastSpawnTime = now;
+                }
+
+                // Move Asteroids
+                for (let i = game.asteroids.length - 1; i >= 0; i--) {
+                    const asteroid = game.asteroids[i];
+                    asteroid.position.y -= game.asteroidSpeed;
+                    
+                    asteroid.rotation.x += asteroid.userData.rotationSpeed.x;
+                    asteroid.rotation.y += asteroid.userData.rotationSpeed.y;
+                    asteroid.rotation.z += asteroid.userData.rotationSpeed.z;
+
+                    if (asteroid.position.y < game.camera.bottom - 1) {
+                        game.scene.remove(asteroid);
+                        asteroid.geometry.dispose();
+                        if (Array.isArray(asteroid.material)) {
+                            asteroid.material.forEach(m => m.dispose());
+                        } else {
+                            asteroid.material.dispose();
+                        }
+                        game.asteroids.splice(i, 1);
+                    }
+                }
+
+                // Move Projectiles (Autonomous Missiles)
+                for (let i = game.projectiles.length - 1; i >= 0; i--) {
+                    const projectile = game.projectiles[i];
+
+                    // If projectile has a target asteroid and it still exists
+                    if (projectile.userData.targetAsteroid && game.asteroids.includes(projectile.userData.targetAsteroid)) {
+                        const targetPosition = projectile.userData.targetAsteroid.position;
+                        const currentPosition = projectile.position;
+                        const direction = new THREE.Vector3().subVectors(targetPosition, currentPosition).normalize();
+                        
+                        // Small amount of turning / homing
+                        const homingFactor = 0.05; // How quickly it adjusts course
+                        projectile.userData.velocity.lerp(direction.multiplyScalar(game.projectileSpeed), homingFactor);
+                        projectile.position.add(projectile.userData.velocity);
+
+                        // Make the missile point towards its target for visual appeal
+                        projectile.lookAt(targetPosition);
+
+                    } else {
+                        // If no target or target destroyed, continue in last known direction or simply move up
+                        projectile.position.add(projectile.userData.velocity); // Use pre-calculated velocity
+                    }
+
+                    if (projectile.position.y > game.camera.top + 1 || projectile.position.y < game.camera.bottom - 1 ||
+                        projectile.position.x > game.camera.right + 1 || projectile.position.x < game.camera.left - 1) {
+                        game.scene.remove(projectile);
+                        projectile.geometry.dispose();
+                        if (Array.isArray(projectile.material)) {
+                            projectile.material.forEach(m => m.dispose());
+                        } else {
+                            projectile.material.dispose();
+                        }
+                        game.projectiles.splice(i, 1);
+                    }
+                }
+
+                // Collision Detection (Projectiles vs. Asteroids)
+                for (let pIdx = game.projectiles.length - 1; pIdx >= 0; pIdx--) {
+                    const projectile = game.projectiles[pIdx];
+                    const projectileBox = new THREE.Box3().setFromObject(projectile);
+
+                    for (let aIdx = game.asteroids.length - 1; aIdx >= 0; aIdx--) {
+                        const asteroid = game.asteroids[aIdx];
+                        const asteroidBox = new THREE.Box3().setFromObject(asteroid);
+
+                        if (projectileBox.intersectsBox(asteroidBox)) {
+                            // Projectile hit asteroid!
+                            game.scene.remove(projectile);
+                            projectile.geometry.dispose();
+                            if (Array.isArray(projectile.material)) {
+                                projectile.material.forEach(m => m.dispose());
+                            } else {
+                                projectile.material.dispose();
+                            }
+                            game.projectiles.splice(pIdx, 1); // Remove projectile
+
+                            // Autonomous missiles deal full damage / instantly destroy
+                            spawnExplosion(asteroid.position.x, asteroid.position.y, asteroid.position.z, 20, asteroid.scale.x * 0.2);
+                            game.scene.remove(asteroid);
+                            asteroid.geometry.dispose();
+                            if (Array.isArray(asteroid.material)) {
+                                asteroid.material.forEach(m => m.dispose());
+                            } else {
+                                asteroid.material.dispose();
+                            }
+                            game.asteroids.splice(aIdx, 1); // Remove asteroid
+
+                            game.score++;
+                            scoreDisplay.textContent = `Score: ${game.score}`;
+                            break;
+                        }
+                    }
+                }
+
+                // Collision Detection (Asteroids vs. Player Ship)
+                // Recompute playerBox as player might have moved
+                const currentPlayerBox = new THREE.Box3().setFromObject(game.player);
+                for (let i = game.asteroids.length - 1; i >= 0; i--) {
+                    const asteroid = game.asteroids[i];
+                    const asteroidBox = new THREE.Box3().setFromObject(asteroid);
+
+                    if (currentPlayerBox.intersectsBox(asteroidBox)) {
+                        game.playerHealth -= 25; // More significant damage for direct impact
+                        healthDisplay.textContent = `Health: ${game.playerHealth}`;
+
+                        // Visual hit effect on player (temporary color change)
+                        game.player.traverse(child => {
+                            if (child.isMesh && child.material) {
+                                child.material.color.set(0xFF0000); // Red for hit
+                                setTimeout(() => {
+                                    if (child.material) {
+                                        if (child.geometry instanceof THREE.ExtrudeGeometry) child.material.color.set(0x808080); // Body
+                                        else if (child.geometry instanceof THREE.BoxGeometry) child.material.color.set(0x555555); // Wings
+                                    }
+                                }, 100);
+                            }
+                        });
+
+                        spawnExplosion(asteroid.position.x, asteroid.position.y, asteroid.position.z, 10, asteroid.scale.x * 0.1);
+
+                        game.scene.remove(asteroid);
+                        asteroid.geometry.dispose();
+                        if (Array.isArray(asteroid.material)) {
+                            asteroid.material.forEach(m => m.dispose());
+                        } else {
+                            asteroid.material.dispose();
+                        }
+                        game.asteroids.splice(i, 1);
+
+                        if (game.playerHealth <= 0) {
+                            game.gameStarted = false;
+                            gameMessage.textContent = `Game Over! Score: ${game.score}`;
+                            getLLMGameAnalysis(game.score); // Call LLM for analysis
+                            gameOverlay.style.display = 'flex';
+                            cancelAnimationFrame(game.animationFrameId);
+                        }
+                    }
+                }
+
+                // Parallax Background Scrolling
+                game.backgroundStars.forEach(star => {
+                    star.position.y -= star.userData.speed * star.userData.parallaxDepth;
+                    if (star.position.y < game.camera.bottom - 1) {
+                        star.position.y = game.camera.top + 1;
+                        star.position.x = (Math.random() - 0.5) * (game.camera.right - game.camera.left - 2);
+                    }
+                });
+
+                // Update explosion particles
+                for (let i = game.explosionParticles.length - 1; i >= 0; i--) {
+                    const particle = game.explosionParticles[i];
+                    particle.position.add(particle.userData.velocity);
+                    particle.scale.multiplyScalar(1 - particle.userData.scaleSpeed);
+                    particle.material.opacity = particle.userData.life / particle.userData.maxLife;
+                    particle.userData.life--;
+
+                    if (particle.userData.life <= 0 || particle.scale.x < 0.01) {
+                        game.scene.remove(particle);
+                        particle.geometry.dispose();
+                        if (Array.isArray(particle.material)) {
+                            particle.material.forEach(m => m.dispose());
+                        } else {
+                            particle.material.dispose();
+                        }
+                        game.explosionParticles.splice(i, 1);
+                    }
+                }
+
+                // Update confetti particles
+                for (let i = game.confettiParticles.length - 1; i >= 0; i--) {
+                    const particle = game.confettiParticles[i];
+                    particle.userData.velocity.y -= 0.005;
+                    particle.position.add(particle.userData.velocity);
+                    particle.rotation.x += particle.userData.rotationSpeed.x;
+                    particle.rotation.y += particle.userData.rotationSpeed.y;
+                    particle.rotation.z += particle.userData.rotationSpeed.z;
+                    particle.userData.life--;
+
+                    if (particle.userData.life <= 0 || particle.position.y < game.camera.bottom - 1) {
+                        game.scene.remove(particle);
+                        particle.geometry.dispose();
+                        if (Array.isArray(particle.material)) {
+                            particle.material.forEach(m => m.dispose());
+                        } else {
+                            particle.material.dispose();
+                        }
+                        game.confettiParticles.splice(i, 1);
+                    }
+                }
+            }
+
+            game.renderer.render(game.scene, game.camera);
+            game.animationFrameId = requestAnimationFrame(animate);
+        }
+
+        /**
+         * Fires a projectile based on the current shooting mode.
+         */
+        function fireProjectile() {
+            if (!game.gameStarted) return;
+
+            const baseProjectileGeometry = new THREE.SphereGeometry(0.1, 8, 8);
+            const baseProjectileMaterial = new THREE.MeshBasicMaterial({ color: 0xffa500 }); // Orange for single
+
+            if (game.shootingMode === 'single') {
+                const nearestAsteroid = findNearestAsteroid(game.player.position);
+                if (nearestAsteroid) { // Only fire if a target exists
+                    const projectile = new THREE.Mesh(baseProjectileGeometry, baseProjectileMaterial);
+                    projectile.position.copy(game.player.position);
+                    // Adjust projectile start position relative to the ship's nose (approx)
+                    projectile.position.y += game.player.scale.y * 0.75;
+                    projectile.userData.targetAsteroid = nearestAsteroid;
+                    // Initial velocity towards target, will be refined by homing
+                    projectile.userData.velocity = new THREE.Vector3().subVectors(nearestAsteroid.position, projectile.position).normalize().multiplyScalar(game.projectileSpeed);
+                    game.scene.add(projectile);
+                    game.projectiles.push(projectile);
+                }
+            } else if (game.shootingMode === 'mass') {
+                const availableAsteroids = [...game.asteroids]; // Copy the array to iterate
+                const massBombMaterial = new THREE.MeshBasicMaterial({ color: 0xFFD700 }); // Gold for mass bomb
+                
+                // Bomb the entire screen - spawn missiles for all current asteroids
+                for (const asteroid of availableAsteroids) {
+                    const projectile = new THREE.Mesh(baseProjectileGeometry, massBombMaterial); // Use new material
+                    projectile.position.copy(game.player.position);
+                    projectile.position.y += game.player.scale.y * 0.75; // Adjust for ship nose
+                    projectile.userData.targetAsteroid = asteroid; // Each missile targets a specific asteroid
+                    
+                    // Calculate initial velocity towards the asteroid
+                    let initialDirection = new THREE.Vector3().subVectors(asteroid.position, projectile.position).normalize();
+                    projectile.userData.velocity = initialDirection.multiplyScalar(game.projectileSpeed);
+
+                    game.scene.add(projectile);
+                    game.projectiles.push(projectile);
+                }
+            }
+        }
+
+        /**
+         * Function to call the Gemini API for game analysis.
+         * @param {number} score - The player's final score.
+         */
+        async function getLLMGameAnalysis(score) {
+            geminiAnalysisElement.textContent = "✨ Analyzing your flight data... ✨"; // Loading message
+
+            const prompt = `Given a score of ${score} in a space shooter game where you shoot asteroids and avoid damage, provide a short, encouraging, or slightly analytical summary of the performance. Keep it concise, under 50 words, and in a tone suitable for a game feedback message.`;
+
+            let chatHistory = [];
+            chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+            const payload = { contents: chatHistory };
+            const apiKey = ""; // Canvas will automatically provide it in runtime
+
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json();
+
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    const text = result.candidates[0].content.parts[0].text;
+                    geminiAnalysisElement.textContent = `✨ ${text} ✨`;
+                } else {
+                    geminiAnalysisElement.textContent = "✨ Analysis unavailable. Try again! ✨";
+                    console.error("Gemini API response structure unexpected:", result);
+                }
+            } catch (error) {
+                geminiAnalysisElement.textContent = "✨ Analysis failed. Check console for errors. ✨";
+                console.error("Error calling Gemini API:", error);
+            }
+        }
+
+
+        /**
+         * Starts or restarts the game.
+         */
+        function startGame() {
+            // Reset game state
+            game.score = 0;
+            scoreDisplay.textContent = `Score: ${game.score}`;
+            game.playerHealth = game.maxPlayerHealth;
+            healthDisplay.textContent = `Health: ${game.playerHealth}`;
+
+            // Clear all game objects from previous rounds
+            game.projectiles.forEach(p => { game.scene.remove(p); p.geometry.dispose(); if(Array.isArray(p.material)) p.material.forEach(m=>m.dispose()); else p.material.dispose(); });
+            game.projectiles = [];
+            game.asteroids.forEach(a => { game.scene.remove(a); a.geometry.dispose(); if(Array.isArray(a.material)) a.material.forEach(m=>m.dispose()); else a.material.dispose(); });
+            game.asteroids = [];
+            game.confettiParticles.forEach(c => { game.scene.remove(c); c.geometry.dispose(); if(Array.isArray(c.material)) c.material.forEach(m=>m.dispose()); else c.material.dispose(); });
+            game.confettiParticles = [];
+            game.explosionParticles.forEach(e => { game.scene.remove(e); e.geometry.dispose(); if(Array.isArray(e.material)) e.material.forEach(m=>m.dispose()); else e.material.dispose(); });
+            game.explosionParticles = [];
+
+            // Reset player position
+            game.player.position.set(0, -7, 0);
+
+            // Set game status
+            game.gameStarted = true;
+            gameOverlay.style.display = 'none'; // Hide overlay
+            geminiAnalysisElement.textContent = ""; // Clear previous analysis
+
+            // Start animation loop if not already running
+            if (!game.animationFrameId) {
+                animate();
+            }
+        }
+
+        // --- Event Handlers ---
+
+        /**
+         * Handles touch start event on game container (for starting game or firing).
+         * @param {TouchEvent} event
+         */
+        function handleGameContainerTouchStart(event) {
+            if (!game.gameStarted) {
+                startGame(); // Still allow game start on any tap
+                return;
+            }
+            // Store initial touch for tap vs. drag detection
+            game.touchStartX = event.touches[0].clientX;
+            game.touchStartY = event.touches[0].clientY;
+        }
+
+        /**
+         * Handles touch end event on game container (for firing on tap).
+         * @param {TouchEvent} event
+         */
+        function handleGameContainerTouchEnd(event) {
+            if (!game.gameStarted) return; // Should be handled by handleGameContainerTouchStart
+
+            const touchEndX = event.changedTouches[0].clientX;
+            const touchEndY = event.changedTouches[0].clientY;
+            const deltaX = Math.abs(touchEndX - game.touchStartX);
+            const deltaY = Math.abs(touchEndY - game.touchStartY);
+
+            // Check if it was a tap (small movement)
+            if (deltaX < game.touchThreshold && deltaY < game.touchThreshold) {
+                // Determine if the tap was on a UI button area to prevent firing
+                const rect = gameContainer.getBoundingClientRect();
+                const tapYRelative = touchEndY - rect.top;
+                const tapXRelative = touchEndX - rect.left;
+
+                // Define regions for the UI buttons (adjust these if UI layout changes significantly)
+                const topUiHeight = 100;
+                const bottomUiHeight = 100;
+                const sideButtonWidth = 100;
+
+                const isOverTopUI = tapYRelative < topUiHeight;
+                const isOverBottomLeftUI = tapYRelative > (rect.height - bottomUiHeight) && tapXRelative < sideButtonWidth * 2;
+                const isOverBottomRightUI = tapYRelative > (rect.height - bottomUiHeight) && tapXRelative > (rect.width - sideButtonWidth);
+
+                if (!isOverTopUI && !isOverBottomLeftUI && !isOverBottomRightUI) {
+                    // This tap is outside UI elements, so fire a projectile
+                    fireProjectile();
+                }
+            }
+        }
+
+        /**
+         * Handles mouse down event on game container (for starting game or firing).
+         * @param {MouseEvent} event
+         */
+        function handleGameContainerMouseDown(event) {
+            if (!game.gameStarted) {
+                startGame();
+                return;
+            }
+            game.touchStartX = event.clientX;
+            game.touchStartY = event.clientY;
+        }
+
+        /**
+         * Handles mouse up event on game container (for firing on click).
+         * @param {MouseEvent} event
+         */
+        function handleGameContainerMouseUp(event) {
+            if (!game.gameStarted) return;
+
+            const clickEndX = event.clientX;
+            const clickEndY = event.clientY;
+            const deltaX = Math.abs(clickEndX - game.touchStartX);
+            const deltaY = Math.abs(clickEndY - game.touchStartY);
+
+            if (deltaX < game.touchThreshold && deltaY < game.touchThreshold) {
+                const rect = gameContainer.getBoundingClientRect();
+                const clickYRelative = clickEndY - rect.top;
+                const clickXRelative = clickEndX - rect.left;
+
+                const topUiHeight = 100;
+                const bottomUiHeight = 100;
+                const sideButtonWidth = 100;
+
+                const isOverTopUI = clickYRelative < topUiHeight;
+                const isOverBottomLeftUI = clickYRelative > (rect.height - bottomUiHeight) && clickXRelative < sideButtonWidth * 2;
+                const isOverBottomRightUI = clickYRelative > (rect.height - bottomUiHeight) && clickXRelative > (rect.width - sideButtonWidth);
+
+                if (!isOverTopUI && !isOverBottomLeftUI && !isOverBottomRightUI) {
+                    fireProjectile();
+                }
+            }
+        }
+
+        /**
+         * Sets the active shooting mode and updates button styles.
+         * @param {string} mode - 'single' or 'mass'
+         */
+        function setShootingMode(mode) {
+            game.shootingMode = mode;
+            if (mode === 'single') {
+                singleShotButton.classList.add('active');
+                massBombButton.classList.remove('active');
+            } else {
+                singleShotButton.classList.remove('active');
+                massBombButton.classList.add('active');
+            }
+        }
+
+        // --- Initial setup and event listeners ---
+        window.onload = function() {
+            initThreeJS();
+            game.player.traverse(child => {
+                if (child.geometry && child.geometry.computeBoundingBox) {
+                    child.geometry.computeBoundingBox();
+                }
+            });
+
+            window.addEventListener('resize', onWindowResize);
+
+            // Add event listeners for game container (for starting game and general taps/clicks for firing)
+            gameContainer.addEventListener('touchstart', handleGameContainerTouchStart);
+            gameContainer.addEventListener('touchend', handleGameContainerTouchEnd);
+            gameContainer.addEventListener('mousedown', handleGameContainerMouseDown);
+            gameContainer.addEventListener('mouseup', handleGameContainerMouseUp);
+
+            // Explicit Movement Button Listeners
+            moveLeftButton.addEventListener('touchstart', (e) => { e.preventDefault(); game.isMovingLeft = true; });
+            moveLeftButton.addEventListener('touchend', (e) => { e.preventDefault(); game.isMovingLeft = false; });
+            moveLeftButton.addEventListener('mousedown', (e) => { e.preventDefault(); game.isMovingLeft = true; });
+            moveLeftButton.addEventListener('mouseup', (e) => { e.preventDefault(); game.isMovingLeft = false; });
+            moveLeftButton.addEventListener('mouseleave', () => { game.isMovingLeft = false; });
+
+            moveRightButton.addEventListener('touchstart', (e) => { e.preventDefault(); game.isMovingRight = true; });
+            moveRightButton.addEventListener('touchend', (e) => { e.preventDefault(); game.isMovingRight = false; });
+            moveRightButton.addEventListener('mousedown', (e) => { e.preventDefault(); game.isMovingRight = true; });
+            moveRightButton.addEventListener('mouseup', (e) => { e.preventDefault(); game.isMovingRight = false; });
+            moveRightButton.addEventListener('mouseleave', () => { game.isMovingRight = false; });
+
+            // Explicit Fire Button Listener
+            fireButton.addEventListener('touchstart', (e) => { e.preventDefault(); fireProjectile(); });
+            fireButton.addEventListener('mousedown', (e) => { e.preventDefault(); fireProjectile(); });
+
+            // Start Game button event listener
+            startGameButton.addEventListener('click', startGame);
+
+            // Shooting mode button listeners
+            singleShotButton.addEventListener('click', () => setShootingMode('single'));
+            massBombButton.addEventListener('click', () => setShootingMode('mass'));
+
+            // Set initial mode
+            setShootingMode(game.shootingMode);
+
+            // Start the animation loop when the window is loaded
+            animate();
+        };
+
+        // Cleanup when the window is unloaded
+        window.onbeforeunload = function() {
+            window.removeEventListener('resize', onWindowResize);
+            gameContainer.removeEventListener('touchstart', handleGameContainerTouchStart);
+            gameContainer.removeEventListener('touchend', handleGameContainerTouchEnd);
+            gameContainer.removeEventListener('mousedown', handleGameContainerMouseDown);
+            gameContainer.removeEventListener('mouseup', handleGameContainerMouseUp);
+
+            moveLeftButton.removeEventListener('touchstart', (e) => { e.preventDefault(); game.isMovingLeft = true; });
+            moveLeftButton.removeEventListener('touchend', (e) => { e.preventDefault(); game.isMovingLeft = false; });
+            moveLeftButton.removeEventListener('mousedown', (e) => { e.preventDefault(); game.isMovingLeft = true; });
+            moveLeftButton.removeEventListener('mouseup', (e) => { e.preventDefault(); game.isMovingLeft = false; });
+            moveLeftButton.removeEventListener('mouseleave', () => { game.isMovingLeft = false; });
+
+            moveRightButton.removeEventListener('touchstart', (e) => { e.preventDefault(); game.isMovingRight = true; });
+            moveRightButton.removeEventListener('touchend', (e) => { e.preventDefault(); game.isMovingRight = false; });
+            moveRightButton.removeEventListener('mousedown', (e) => { e.preventDefault(); game.isMovingRight = true; });
+            moveRightButton.removeEventListener('mouseup', (e) => { e.preventDefault(); game.isMovingRight = false; });
+            moveRightButton.removeEventListener('mouseleave', () => { game.isMovingRight = false; });
+
+            fireButton.removeEventListener('touchstart', (e) => { e.preventDefault(); fireProjectile(); });
+            fireButton.removeEventListener('mousedown', (e) => { e.preventDefault(); fireProjectile(); });
+
+            startGameButton.removeEventListener('click', startGame);
+            singleShotButton.removeEventListener('click', () => setShootingMode('single'));
+            massBombButton.removeEventListener('click', () => setShootingMode('mass'));
+
+
+            if (game.animationFrameId) {
+                cancelAnimationFrame(game.animationFrameId);
+            }
+            if (game.renderer) {
+                game.renderer.dispose();
+            }
+            if (game.scene) {
+                game.scene.children.forEach(child => {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) {
+                        if (Array.isArray(child.material)) {
+                            child.material.forEach(material => material.dispose());
+                        } else {
+                            child.material.dispose();
+                        }
+                    }
+                });
+            }
+        };
+    </script>
+</body>
+</html>
